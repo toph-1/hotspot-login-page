@@ -103,7 +103,7 @@ EOF
 setup() {
     echo "[+] Installing dependencies..."
     sudo apt update
-    sudo apt install hostapd dnsmasq php-cli iptables -y
+    sudo apt install hostapd dnsmasq php-cli iptables xterm -y
     echo "[+] Setup complete!"
 }
 
@@ -161,7 +161,7 @@ stop_hotspot() {
 }
 
 # ---------------------------
-# Start PHP login page server in another terminal
+# Start PHP login page server in another terminal (robust)
 # ---------------------------
 start_server() {
     ensure_directories
@@ -171,6 +171,10 @@ start_server() {
         gnome-terminal -- bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
     elif command -v x-terminal-emulator >/dev/null 2>&1; then
         x-terminal-emulator -e bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
+    elif command -v xterm >/dev/null 2>&1; then
+        xterm -hold -e "cd '$PORTAL_DIR' && php -S 0.0.0.0:80"
+    elif command -v konsole >/dev/null 2>&1; then
+        konsole -e bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
     else
         echo "[!] No supported terminal emulator found. Running in current terminal..."
         cd "$PORTAL_DIR" || exit
