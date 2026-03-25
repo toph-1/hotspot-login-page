@@ -2,20 +2,20 @@
 
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
-HOSTAPD_CONF="/tmp/hostapd_open.conf"
-HOTSPOT_IFACE="wlp4s0"   # <--- Updated interface
-HOTSPOT_IP="192.168.50.1"
+HOTSPOT_IFACE="wlp4s0"   # Wi-Fi interface
+INTERNET_IFACE=""         # leave empty for hotspot-only (no internet)
+SSID="FreeWiFi"
 
 # ---------------------------
 # Check if hotspot is running
 # ---------------------------
 is_hotspot_running() {
-    pgrep hostapd >/dev/null 2>&1
+    pgrep create_ap >/dev/null 2>&1
     return $?
 }
 
 # ---------------------------
-# Start open hotspot using hostapd
+# Start open hotspot using create_ap
 # ---------------------------
 start_hotspot() {
     if is_hotspot_running; then
@@ -23,27 +23,14 @@ start_hotspot() {
         return
     fi
 
-    # Assign static IP
-    sudo ifconfig $HOTSPOT_IFACE $HOTSPOT_IP netmask 255.255.255.0
-
-    # Create temporary hostapd config
-    cat > $HOSTAPD_CONF <<EOF
-interface=$HOTSPOT_IFACE
-driver=nl80211
-ssid=FreeWiFi
-hw_mode=g
-channel=6
-auth_algs=1
-ignore_broadcast_ssid=0
-wpa=0
-EOF
-
     echo "[+] Starting open hotspot..."
-    sudo hostapd $HOSTAPD_CONF -B
-    if [ $? -eq 0 ]; then
+    # Requires sudo
+    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" &
+    sleep 2
+    if is_hotspot_running; then
         echo "[+] Open hotspot started successfully!"
     else
-        echo "[-] Failed to start hotspot. Make sure $HOTSPOT_IFACE is correct and free."
+        echo "[-] Failed to start hotspot. Check your Wi-Fi interface and driver."
     fi
 }
 
@@ -52,7 +39,7 @@ EOF
 # ---------------------------
 stop_hotspot() {
     if is_hotspot_running; then
-        sudo pkill hostapd
+        sudo pkill create_ap
         echo "[+] Hotspot stopped."
     else
         echo "[!] No hotspot is running."
@@ -108,7 +95,7 @@ edit_page() {
 }
 
 # ---------------------------
-# Setup files/folders
+# Setup folders/files
 # ---------------------------
 setup() {
     echo "[+] Setting up folders..."
