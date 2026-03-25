@@ -2,8 +2,8 @@
 
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
-HOTSPOT_IFACE="wlp4s0"   # Wi-Fi interface
-INTERNET_IFACE=""         # leave empty for hotspot-only (no internet)
+HOTSPOT_IFACE="wlp4s0"   # Wi-Fi interface for hotspot
+INTERNET_IFACE=""         # Leave empty for hotspot-only
 SSID="FreeWiFi"
 
 # ---------------------------
@@ -24,9 +24,10 @@ start_hotspot() {
     fi
 
     echo "[+] Starting open hotspot..."
-    # Requires sudo
-    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" &
+    # Run hotspot in background (-B) as open network
+    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" -B
     sleep 2
+
     if is_hotspot_running; then
         echo "[+] Open hotspot started successfully!"
     else
@@ -106,7 +107,7 @@ setup() {
 }
 
 # ---------------------------
-# Main Menu
+# Main Number Menu
 # ---------------------------
 while true; do
     echo ""
