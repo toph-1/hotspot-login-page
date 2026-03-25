@@ -19,20 +19,16 @@ ensure_directories() {
     if [ ! -f "$PORTAL_DIR/index.php" ]; then
 cat > "$PORTAL_DIR/index.php" <<'EOF'
 <?php
-// iOS & Android captive portal detection
 $redirectPaths = ['/hotspot-detect.html','/generate_204','/connecttest.txt','/ncsi.txt'];
 if (in_array($_SERVER['REQUEST_URI'], $redirectPaths)) {
     header("Location: /index.php");
     exit;
 }
-
-// Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $firstname = isset($_POST['firstname']) ? $_POST['firstname'] : '';
-    $lastname = isset($_POST['lastname']) ? $_POST['lastname'] : '';
+    $firstname = $_POST['firstname'] ?? '';
+    $lastname = $_POST['lastname'] ?? '';
     file_put_contents('../logs/log.txt', date('Y-m-d H:i:s') . " - FIRSTNAME: $firstname LASTNAME: $lastname\n", FILE_APPEND);
 
-    // Show connected message
     echo "<!DOCTYPE html>
 <html>
 <head>
@@ -53,8 +49,6 @@ body { display:flex; justify-content:center; align-items:center; height:100vh; f
 </html>";
     exit;
 }
-
-// Default: show login page
 include("index.html");
 EOF
     fi
@@ -103,7 +97,7 @@ EOF
 setup() {
     echo "[+] Installing dependencies..."
     sudo apt update
-    sudo apt install hostapd dnsmasq php-cli iptables xterm -y
+    sudo apt install hostapd dnsmasq php-cli iptables -y
     echo "[+] Setup complete!"
 }
 
@@ -148,6 +142,9 @@ start_hotspot() {
     sudo iptables -t nat -A POSTROUTING -o $HOTSPOT_IFACE -j MASQUERADE
 
     echo "[+] Hotspot started. Devices should see 'Wi-Fi Needs a Login' popup."
+
+    # Start login page server in background automatically
+    start_server
 }
 
 stop_hotspot() {
@@ -161,25 +158,14 @@ stop_hotspot() {
 }
 
 # ---------------------------
-# Start PHP login page server in another terminal (robust)
+# Start PHP login page server in background
 # ---------------------------
 start_server() {
     ensure_directories
-    echo "[+] Starting login page server in a new terminal..."
-
-    if command -v gnome-terminal >/dev/null 2>&1; then
-        gnome-terminal -- bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
-    elif command -v x-terminal-emulator >/dev/null 2>&1; then
-        x-terminal-emulator -e bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
-    elif command -v xterm >/dev/null 2>&1; then
-        xterm -hold -e "cd '$PORTAL_DIR' && php -S 0.0.0.0:80"
-    elif command -v konsole >/dev/null 2>&1; then
-        konsole -e bash -c "cd '$PORTAL_DIR' && php -S 0.0.0.0:80; exec bash"
-    else
-        echo "[!] No supported terminal emulator found. Running in current terminal..."
-        cd "$PORTAL_DIR" || exit
-        php -S 0.0.0.0:80
-    fi
+    echo "[+] Starting login page server in background..."
+    cd "$PORTAL_DIR" || exit
+    php -S 0.0.0.0:80 > /dev/null 2>&1 &
+    echo "[+] Login page server running!"
 }
 
 show_devices() { cat /var/lib/misc/dnsmasq.leases 2>/dev/null; }
@@ -200,7 +186,7 @@ echo "====== Captive Portal Number Tool ======"
 echo "1) Setup Dependencies"
 echo "2) Start Hotspot + Captive Portal"
 echo "3) Stop Hotspot"
-echo "4) Start Login Page Server"
+echo "4) Start Login Page Server (Background)"
 echo "5) Show Connected Devices"
 echo "6) View Logs"
 echo "7) Live Logs"
